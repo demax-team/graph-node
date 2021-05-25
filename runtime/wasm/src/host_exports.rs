@@ -332,20 +332,37 @@ impl HostExports {
                     )
                 })?,
         };
-
-        let call = EthereumContractCall {
+        let mut call = EthereumContractCall {
             address: unresolved_call.contract_address.clone(),
             block_ptr: block.into(),
             function: function.clone(),
             args: unresolved_call.function_args.clone(),
         };
 
+        // Check the head number behind latest number over 128
+        let eth_adapter1 = self.ethereum_adapter.clone();
+        let logger1 = logger.clone();
+        let _res = match block_on(future::lazy(move || {
+            eth_adapter1.latest_block_header(&logger1)
+        })) {
+            Ok(b) => {
+                let latest_number = b.number.unwrap().as_u64() as i64;
+                let head_number = block.number.unwrap().as_u64() as i64;
+                let distance = latest_number - head_number;
+                if distance >= 128 {
+                    println!("=============== Changed block ptr because of distance is over 128");
+                    call.block_ptr = b.into()
+                }
+            }
+            Err(_e) => {}
+        };
+
         // Run Ethereum call in tokio runtime
         let eth_adapter = self.ethereum_adapter.clone();
-        let logger1 = logger.clone();
+        let logger2 = logger.clone();
         let call_cache = self.call_cache.clone();
         let result = match block_on(future::lazy(move || {
-            eth_adapter.contract_call(&logger1, call, call_cache)
+            eth_adapter.contract_call(&logger2, call, call_cache)
         })) {
             Ok(tokens) => Ok(Some(tokens)),
             Err(EthereumContractCallError::Revert(reason)) => {
